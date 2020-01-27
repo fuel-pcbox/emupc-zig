@@ -58,6 +58,18 @@ pub const cpu_808x = struct {
     }
 };
 
+pub fn machine_type(comptime self: type) type {
+    return struct {
+        pub fn mem_read_byte(machine: var, address: u20) u8 {
+            return machine.mem_read_byte_real(address);
+        }
+
+        pub fn mem_write_byte(machine: var, address: u20, data: u8) void {
+            machine.mem_write_byte_real(address, data);
+        }
+    };
+}
+
 pub const pcmachine = struct {
     rom: []u8,
     ram: []u8,
@@ -73,6 +85,23 @@ pub const pcmachine = struct {
             .cpu = cpu_808x.new(),
         };
     }
+
+    pub fn mem_read_byte_real(self: pcmachine, address: u20) u8 {
+        return switch(address) {
+            0 ... 0x9ffff => self.ram[address],
+            0xa0000 ... 0xfdfff => 0xff,
+            0xfe000 ... 0xfffff => self.rom[address & 0x1fff],
+        };
+    }
+
+    pub fn mem_write_byte_real(self: pcmachine, address: u20, data: u8) void {
+        switch(address) {
+            0 ... 0x9ffff => self.ram[address] = data,
+            0xa0000 ... 0xfffff => return,
+        }
+    }
+
+    pub usingnamespace machine_type(pcmachine);
 };
 
 pub fn main() anyerror!void {
@@ -93,6 +122,10 @@ pub fn main() anyerror!void {
         const rom_path = try std.fs.path.join(allocator, &([_][]const u8{"roms", "machines", "ibmpc", "BIOS_5150_24APR81_U33.BIN"}));
         var machine = try pcmachine.new(allocator, rom_path);
 
-        std.debug.warn("Opcode: {0x:0<2}\n", .{machine.rom[((machine.cpu.segs[1] << 4) + machine.cpu.ip) & 0x1fff]});
+        std.debug.warn("Opcode: {0x:0<2}\n", .{machine.mem_read_byte(0xffff0)});
+
+        machine.mem_write_byte(0, 0xff);
+
+        std.debug.warn("Value at 0: {0x:0<2}\n", .{machine.mem_read_byte(0)});
     }
 }
