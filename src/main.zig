@@ -1,6 +1,7 @@
 const std = @import("std");
 const io = std.io;
 const mem = std.mem;
+const traits = @import("traits.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -58,19 +59,13 @@ pub const Cpu808x = struct {
             .flags = Cpu808xFlags{},
         };
     }
+
+    pub fn tick(self: *@This(), machine: var) void {
+        if (comptime !traits.implementsMachine(@TypeOf(machine))) {
+            @compileError("Passed in non-valid machine");
+        }
+    }
 };
-
-pub fn MachineType(comptime self: type) type {
-    return struct {
-        pub fn memReadByte(machine: var, address: u20) u8 {
-            return machine.memReadByteReal(address);
-        }
-
-        pub fn memWriteByte(machine: var, address: u20, data: u8) void {
-            machine.memWriteByteReal(address, data);
-        }
-    };
-}
 
 pub const PcMachine = struct {
     rom: []u8,
@@ -94,7 +89,7 @@ pub const PcMachine = struct {
         self.allocator.free(self.ram);
     }
 
-    pub fn memReadByteReal(self: PcMachine, address: u20) u8 {
+    pub fn memReadByte(self: PcMachine, address: u20) u8 {
         return switch (address) {
             0...0x9ffff => self.ram[address],
             0xa0000...0xfdfff => 0xff,
@@ -102,14 +97,12 @@ pub const PcMachine = struct {
         };
     }
 
-    pub fn memWriteByteReal(self: PcMachine, address: u20, data: u8) void {
+    pub fn memWriteByte(self: PcMachine, address: u20, data: u8) void {
         switch (address) {
             0...0x9ffff => self.ram[address] = data,
             0xa0000...0xfffff => return,
         }
     }
-
-    pub usingnamespace MachineType(PcMachine);
 };
 
 pub fn main() anyerror!void {
@@ -132,6 +125,7 @@ pub fn main() anyerror!void {
         std.debug.warn("Opcode: {0x:0<2}\n", .{machine.memReadByte(0xffff0)});
 
         machine.memWriteByte(0, 0xff);
+        machine.cpu.tick(machine);
 
         std.debug.warn("Value at 0: {0x:0<2}\n", .{machine.memReadByte(0)});
     }
