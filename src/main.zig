@@ -37,8 +37,8 @@ const cpu_808x_flags = packed struct {
 
     pub fn get_flags(self: @This()) u16 {
         return carry | (@as(u16, parity) << 2) | (@as(u16, adjust) << 4) | (@as(u16, zero) << 6) |
-        (@as(u16, sign) << 7) | (@as(u16, trap) << 8) | (@as(u16, interrupt) << 9) | (@as(u16, direction) << 10) |
-        (@as(u16, overflow) << 11);
+            (@as(u16, sign) << 7) | (@as(u16, trap) << 8) | (@as(u16, interrupt) << 9) | (@as(u16, direction) << 10) |
+            (@as(u16, overflow) << 11);
     }
 };
 
@@ -50,10 +50,12 @@ pub const cpu_808x = struct {
     opcode: u8 = 0,
 
     pub fn new() cpu_808x {
-        var gprs = [8]u16{0, 0, 0, 0, 0, 0, 0, 0};
-        var segs = [4]u16{ 0, 0xffff, 0, 0};
+        var gprs = [8]u16{ 0, 0, 0, 0, 0, 0, 0, 0 };
+        var segs = [4]u16{ 0, 0xffff, 0, 0 };
         return cpu_808x{
-            .gprs = gprs, .segs = segs, .flags = cpu_808x_flags{}
+            .gprs = gprs,
+            .segs = segs,
+            .flags = cpu_808x_flags{},
         };
     }
 };
@@ -87,17 +89,17 @@ pub const pcmachine = struct {
     }
 
     pub fn mem_read_byte_real(self: pcmachine, address: u20) u8 {
-        return switch(address) {
-            0 ... 0x9ffff => self.ram[address],
-            0xa0000 ... 0xfdfff => 0xff,
-            0xfe000 ... 0xfffff => self.rom[address & 0x1fff],
+        return switch (address) {
+            0...0x9ffff => self.ram[address],
+            0xa0000...0xfdfff => 0xff,
+            0xfe000...0xfffff => self.rom[address & 0x1fff],
         };
     }
 
     pub fn mem_write_byte_real(self: pcmachine, address: u20, data: u8) void {
-        switch(address) {
-            0 ... 0x9ffff => self.ram[address] = data,
-            0xa0000 ... 0xfffff => return,
+        switch (address) {
+            0...0x9ffff => self.ram[address] = data,
+            0xa0000...0xfffff => return,
         }
     }
 
@@ -113,13 +115,12 @@ pub fn main() anyerror!void {
     const args = try std.process.argsAlloc(allocator);
 
     if (args.len != 2) {
-        std.process.exit(2);
+        return error.incorrectArgumentCount;
     }
 
     const machine_name = args[1];
-    if(mem.eql(u8, machine_name, "ibmxt"))
-    {
-        const rom_path = try std.fs.path.join(allocator, &([_][]const u8{"roms", "machines", "ibmpc", "BIOS_5150_24APR81_U33.BIN"}));
+    if (mem.eql(u8, machine_name, "ibmxt")) {
+        const rom_path = try std.fs.path.join(allocator, &([_][]const u8{ "roms", "machines", "ibmpc", "BIOS_5150_24APR81_U33.BIN" }));
         var machine = try pcmachine.new(allocator, rom_path);
 
         std.debug.warn("Opcode: {0x:0<2}\n", .{machine.mem_read_byte(0xffff0)});
