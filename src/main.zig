@@ -8,7 +8,7 @@ pub const KiB = 1024;
 pub const MiB = 1024 * KiB;
 pub const GiB = 1024 * MiB;
 
-const cpu_808x_flags = packed struct {
+const Cpu808xFlags = packed struct {
     carry: u1 = 0,
     reserved1: u1 = 1,
     parity: u1 = 0,
@@ -23,7 +23,7 @@ const cpu_808x_flags = packed struct {
     overflow: u1 = 0,
     reserved4: u4 = 0xf,
 
-    pub fn set_flags(self: @This(), value: u16) void {
+    pub fn setFlags(self: @This(), value: u16) void {
         carry = value & 1;
         parity = (value >> 2) & 1;
         adjust = (value >> 4) & 1;
@@ -35,97 +35,104 @@ const cpu_808x_flags = packed struct {
         overflow = (value >> 11) & 1;
     }
 
-    pub fn get_flags(self: @This()) u16 {
+    pub fn getFlags(self: @This()) u16 {
         return carry | (@as(u16, parity) << 2) | (@as(u16, adjust) << 4) | (@as(u16, zero) << 6) |
-        (@as(u16, sign) << 7) | (@as(u16, trap) << 8) | (@as(u16, interrupt) << 9) | (@as(u16, direction) << 10) |
-        (@as(u16, overflow) << 11);
+            (@as(u16, sign) << 7) | (@as(u16, trap) << 8) | (@as(u16, interrupt) << 9) | (@as(u16, direction) << 10) |
+            (@as(u16, overflow) << 11);
     }
 };
 
-pub const cpu_808x = struct {
+pub const Cpu808x = struct {
     gprs: [8]u16,
     segs: [4]u16,
-    flags: cpu_808x_flags,
+    flags: Cpu808xFlags,
     ip: u16 = 0,
     opcode: u8 = 0,
 
-    pub fn new() cpu_808x {
-        var gprs = [8]u16{0, 0, 0, 0, 0, 0, 0, 0};
-        var segs = [4]u16{ 0, 0xffff, 0, 0};
-        return cpu_808x{
-            .gprs = gprs, .segs = segs, .flags = cpu_808x_flags{}
+    pub fn init() Cpu808x {
+        var gprs = [8]u16{ 0, 0, 0, 0, 0, 0, 0, 0 };
+        var segs = [4]u16{ 0, 0xffff, 0, 0 };
+        return Cpu808x{
+            .gprs = gprs,
+            .segs = segs,
+            .flags = Cpu808xFlags{},
         };
     }
 };
 
-pub fn machine_type(comptime self: type) type {
+pub fn MachineType(comptime self: type) type {
     return struct {
-        pub fn mem_read_byte(machine: var, address: u20) u8 {
-            return machine.mem_read_byte_real(address);
+        pub fn memReadByte(machine: var, address: u20) u8 {
+            return machine.memReadByteReal(address);
         }
 
-        pub fn mem_write_byte(machine: var, address: u20, data: u8) void {
-            machine.mem_write_byte_real(address, data);
+        pub fn memWriteByte(machine: var, address: u20, data: u8) void {
+            machine.memWriteByteReal(address, data);
         }
     };
 }
 
-pub const pcmachine = struct {
+pub const PcMachine = struct {
     rom: []u8,
     ram: []u8,
-    cpu: cpu_808x,
+    cpu: Cpu808x,
+    allocator: *Allocator,
 
-    pub fn new(allocator: *Allocator, rom_path: []const u8) !pcmachine {
+    pub fn init(allocator: *Allocator, rom_path: []const u8) !PcMachine {
         var ram = try allocator.alloc(u8, 640 * KiB);
         mem.set(u8, ram, 0);
 
-        return pcmachine{
+        return PcMachine{
             .rom = try io.readFileAlloc(allocator, rom_path),
             .ram = ram,
-            .cpu = cpu_808x.new(),
+            .cpu = Cpu808x.init(),
+            .allocator = allocator,
         };
     }
 
-    pub fn mem_read_byte_real(self: pcmachine, address: u20) u8 {
-        return switch(address) {
-            0 ... 0x9ffff => self.ram[address],
-            0xa0000 ... 0xfdfff => 0xff,
-            0xfe000 ... 0xfffff => self.rom[address & 0x1fff],
+    pub fn deinit(self: *@This()) void {
+        self.allocator.free(self.ram);
+    }
+
+    pub fn memReadByteReal(self: PcMachine, address: u20) u8 {
+        return switch (address) {
+            0...0x9ffff => self.ram[address],
+            0xa0000...0xfdfff => 0xff,
+            0xfe000...0xfffff => self.rom[address & 0x1fff],
         };
     }
 
-    pub fn mem_write_byte_real(self: pcmachine, address: u20, data: u8) void {
-        switch(address) {
-            0 ... 0x9ffff => self.ram[address] = data,
-            0xa0000 ... 0xfffff => return,
+    pub fn memWriteByteReal(self: PcMachine, address: u20, data: u8) void {
+        switch (address) {
+            0...0x9ffff => self.ram[address] = data,
+            0xa0000...0xfffff => return,
         }
     }
 
-    pub usingnamespace machine_type(pcmachine);
+    pub usingnamespace MachineType(PcMachine);
 };
 
 pub fn main() anyerror!void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
-    defer arena.deinit();
-
-    const allocator = &arena.allocator;
+    const allocator = std.heap.c_allocator;
 
     const args = try std.process.argsAlloc(allocator);
+    defer allocator.free(args);
 
     if (args.len != 2) {
-        std.process.exit(2);
+        return error.incorrectArgumentCount;
     }
 
     const machine_name = args[1];
-    if(mem.eql(u8, machine_name, "ibmxt"))
-    {
-        const rom_path = try std.fs.path.join(allocator, &([_][]const u8{"roms", "machines", "ibmpc", "BIOS_5150_24APR81_U33.BIN"}));
-        var machine = try pcmachine.new(allocator, rom_path);
+    if (mem.eql(u8, machine_name, "ibmxt")) {
+        const rom_path = try std.fs.path.join(allocator, &([_][]const u8{ "roms", "machines", "ibmpc", "BIOS_5150_24APR81_U33.BIN" }));
+        defer allocator.free(rom_path);
+        var machine = try PcMachine.init(allocator, rom_path);
+        defer machine.deinit();
 
-        std.debug.warn("Opcode: {0x:0<2}\n", .{machine.mem_read_byte(0xffff0)});
+        std.debug.warn("Opcode: {0x:0<2}\n", .{machine.memReadByte(0xffff0)});
 
-        machine.mem_write_byte(0, 0xff);
+        machine.memWriteByte(0, 0xff);
 
-        std.debug.warn("Value at 0: {0x:0<2}\n", .{machine.mem_read_byte(0)});
+        std.debug.warn("Value at 0: {0x:0<2}\n", .{machine.memReadByte(0)});
     }
 }
